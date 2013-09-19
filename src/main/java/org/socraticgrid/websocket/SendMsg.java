@@ -15,6 +15,9 @@ import javax.websocket.OnOpen;
 import javax.websocket.Session;
 import javax.websocket.server.ServerEndpoint;
 
+import java.util.logging.Level;
+import java.util.logging.Logger;
+
 /**
  *
  * @author tnguyen
@@ -22,6 +25,8 @@ import javax.websocket.server.ServerEndpoint;
 @ServerEndpoint("/sendmsg")
 public class SendMsg {
 
+    private static final Logger logger = Logger.getLogger(SendMsg.class.getName());
+    
     private static final String GUEST_PREFIX = "Guest";
     private static final AtomicInteger connectionIds = new AtomicInteger(0);
     
@@ -39,9 +44,9 @@ public class SendMsg {
     public void start(Session session) {
         this.session = session;
         
-        String message = String.format("%s %s %s", nickname, "has joined: ", this.toString());
-        
-        System.out.println("\n==> OPENING SOCKET: "+ message);
+        String s = String.format("==> OPENING SOCKET: %s %s %s", nickname, "has joined: ", this.toString());
+        logger.log(Level.FINE, "{0}", s);
+        System.out.println(s);
     }
 
 
@@ -49,14 +54,16 @@ public class SendMsg {
     public void end() {
         conns.remove(this);
         
-        String message = String.format("%s %s", nickname, "has disconnected.");
-        System.out.println(message);
+        String s = String.format("==> CLOSING SOCKET: %s %s", nickname, "has disconnected.");
+        logger.log(Level.FINE, "{0}", s);
+        System.out.println(s);
         
     }
 
 
     @OnMessage
     public void incoming(String message) {
+        String s = null;
         //----------------------------------------------
         //     BROADCAST alerts if alerts are given
         //     (note:  will have to trim off headers "ALERTS=###,"
@@ -64,8 +71,9 @@ public class SendMsg {
         //     REGISTER session and patientId
         //----------------------------------------------
         if (message.startsWith("ALERTS=")) {
-            
-            System.out.println("==> ALERTS BEING SENT:\n"+ message);
+            s = String.format("==> ALERTS BEING SENT:\n %s", message);
+            logger.log(Level.FINE,"{0}", message);
+            System.out.println(s);
             
             int commaIndex = message.indexOf(',');
             String patientId = message.substring(7, commaIndex);
@@ -74,10 +82,34 @@ public class SendMsg {
             broadcast(patientId, alertsToSend);
             
         } else {
-            System.out.println( String.format("==> SAVING SESSION/PID: %s PID=%s", 
-                                               this.toString(), message.toString())
-                              );
+            
+            //---------------------------------------------------------
+            // Have to find and remove any previous session of same ID, 
+            // cause this should be the new (and only) re-registration
+            // of this sesionId-patientId  combo.
+            //---------------------------------------------------------
+            for (Map.Entry<SendMsg, String> entry : conns.entrySet()) {
+               
+                SendMsg key = entry.getKey();
+                String foundPatientId = entry.getValue();
+                
+                if (key.toString().equals(this.toString())) {
+                    conns.remove(key);
+                    
+                    s = String.format(
+                            "  REMOVING SESSION: %s PID=%s   .. Total Sessions: %s", 
+                            key.toString(), foundPatientId, conns.size());
+                    System.out.println(s);
+                    logger.log(Level.FINE,"==> {0}", s);
+                }
+            }
             conns.put(this, message.toString());
+            
+            s = String.format(
+                    "SAVING SESSION: %s PID= %s   .. Total Sessions: %s", 
+                    this.toString(), message.toString(), conns.size());
+            System.out.println(s);
+            logger.log(Level.FINE,"==> {0}", s);
         }
         
         
@@ -99,9 +131,8 @@ public class SendMsg {
 
             System.out.println("=======================================");
             System.out.println("INCOMING SESSION "+ this.toString() + "   and PID: "+ patientId);
-            System.out.println("   SAVED SESSION "+ key             + "   and PID: "+foundPatientId);
-
-
+            System.out.println("preSAVED SESSION "+ key             + "   and PID: "+foundPatientId);
+            
             // SEND this new alert to ONLY session that has patient Id
             if (patientId.equalsIgnoreCase(foundPatientId)) {
 
